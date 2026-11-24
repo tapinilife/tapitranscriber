@@ -45,6 +45,7 @@ class TrascriviActivity : Activity() {
         return diretto ?: i.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
     }
 
+    /** Legge l'audio in RAM (nessuna copia su disco), lo trascrive e poi lo lascia liberare. */
     private fun lavora(uri: Uri) {
         val pref = Preferenze(this)
         val esito: Result<Risultato> = try {
@@ -172,6 +173,10 @@ class TrascriviActivity : Activity() {
     override fun onDestroy() {
         dialogo?.setOnDismissListener(null)
         dialogo?.dismiss()
+        // L'audio non viene mai scritto su disco (resta solo in RAM durante l'invio).
+        // Per sicurezza svuoto comunque le cartelle temporanee dell'app.
+        runCatching { cacheDir.listFiles()?.forEach { it.deleteRecursively() } }
+        runCatching { codeCacheDir.listFiles()?.forEach { it.deleteRecursively() } }
         super.onDestroy()
     }
 }
