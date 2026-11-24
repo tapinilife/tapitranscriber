@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fino ad Android 11: nel backup vanno SOLO chiavi e opzioni. -->
+<full-backup-content>
+    <include domain="sharedpref" path="trascrivi.xml" />
+</full-backup-content>

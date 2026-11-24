@@ -8,6 +8,7 @@ import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
@@ -17,12 +18,12 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import org.json.JSONObject
 
-/** Schermata che si apre dall'icona: chiavi API con guida, lingua, esporta/importa, ultima trascrizione. */
+/** Schermata che si apre dall'icona: chiavi API con guida, lingua, ultima trascrizione, aggiornamenti. */
 class ImpostazioniActivity : Activity() {
 
     private lateinit var pref: Preferenze
@@ -104,21 +105,20 @@ class ImpostazioniActivity : Activity() {
             setOnClickListener { salva(); Toast.makeText(context, "Impostazioni salvate", Toast.LENGTH_SHORT).show() }
         }, margine(dp(16)))
 
-        colonna.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            addView(Button(context).apply {
-                text = "Esporta chiavi"
-                setOnClickListener { chiediEsporta() }
-            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(Button(context).apply {
-                text = "Importa chiavi"
-                setOnClickListener { avviaImporta() }
-            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        }, margine(dp(4)))
+        colonna.addView(testo(
+            "Le chiavi restano solo nelle impostazioni dell'app, nessun file in giro. " +
+                "Se cambi telefono passano da sole con il backup di Google o con Smart Switch.",
+            12f, dp(8), 0.65f,
+        ))
 
         colonna.addView(Button(this).apply {
             text = "Ultima trascrizione"
             setOnClickListener { mostraUltima() }
+        }, margine(dp(4)))
+
+        colonna.addView(Button(this).apply {
+            text = "Controlla aggiornamenti"
+            setOnClickListener { controllaAggiornamenti(silenzioso = false) }
         }, margine(dp(4)))
 
         val versione = packageManager.getPackageInfo(packageName, 0).versionName
@@ -234,94 +234,90 @@ class ImpostazioniActivity : Activity() {
         }
     }
 
-    // ---------- esporta / importa ----------
+    // ---------- aggiornamenti ----------
 
-    private fun chiediEsporta() {
-        salva()
-        if (pref.chiaveGroq.isEmpty() && pref.chiaveGemini.isEmpty()) {
-            Toast.makeText(this, "Non ci sono chiavi da esportare", Toast.LENGTH_SHORT).show()
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Esporta chiavi")
-            .setMessage(
-                "Crea un file con le tue chiavi, da aprire con \"Importa chiavi\" sull'altro telefono. " +
-                    "Puoi salvarlo in Download o su Drive.\n\nIl file non è protetto: dopo l'importazione cancellalo.",
-            )
-            .setPositiveButton("Salva file") { _, _ ->
-                startActivityForResult(
-                    Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "application/json"
-                        putExtra(Intent.EXTRA_TITLE, "tapitranscriber-chiavi.json")
-                    },
-                    RICHIESTA_ESPORTA,
-                )
+    override fun onResume() {
+        super.onResume()
+        // Controllo automatico al massimo ogni 6 ore, senza disturbare se non c'è niente di nuovo
+        if (System.currentTimeMillis() - pref.ultimoControllo > 6 * 3_600_000L) controllaAggiornamenti(silenzioso = true)
+    }
+
+    private var controlloInCorso = false
+
+    private fun controllaAggiornamenti(silenzioso: Boolean) {
+        if (controlloInCorso) return
+        controlloInCorso = true
+        if (!silenzioso) Toast.makeText(this, "Controllo aggiornamenti…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val esito = runCatching { Aggiornamenti.ultima() }
+            runOnUiThread {
+                controlloInCorso = false
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val v = esito.getOrNull()
+                if (esito.isSuccess) pref.ultimoControllo = System.currentTimeMillis()
+                when {
+                    v != null && v.codice > Aggiornamenti.versioneInstallata(this) -> proponi(v)
+                    silenzioso -> {}
+                    esito.isFailure -> Toast.makeText(this, "Non riesco a controllare: sei connesso a Internet?", Toast.LENGTH_LONG).show()
+                    else -> Toast.makeText(this, "Hai già l'ultima versione", Toast.LENGTH_SHORT).show()
+                }
             }
-            .setNegativeButton("Annulla", null)
+        }.start()
+    }
+
+    private fun proponi(v: Versione) {
+        AlertDialog.Builder(this)
+            .setTitle("Nuova versione ${v.nome}")
+            .setMessage(v.novita.ifBlank { "È disponibile una versione nuova di TapiTranscriber." })
+            .setPositiveButton("Aggiorna") { _, _ -> aggiorna(v) }
+            .setNegativeButton("Più tardi", null)
             .show()
     }
 
-    private fun avviaImporta() {
-        startActivityForResult(
-            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                addCategory(Intent.CATEGORY_OPENABLE)
-                type = "*/*"
-            },
-            RICHIESTA_IMPORTA,
-        )
-    }
-
-    @Deprecated("API di Activity semplice, senza AndroidX")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        val uri = data?.data
-        if (resultCode != RESULT_OK || uri == null) return
-        when (requestCode) {
-            RICHIESTA_ESPORTA -> esporta(uri)
-            RICHIESTA_IMPORTA -> importa(uri)
-        }
-    }
-
-    private fun esporta(uri: Uri) {
-        val json = JSONObject()
-            .put("app", "TapiTranscriber")
-            .put("versione", 1)
-            .put("groq", pref.chiaveGroq)
-            .put("gemini", pref.chiaveGemini)
-            .put("italiano", pref.soloItaliano)
-        val ok = runCatching {
-            contentResolver.openOutputStream(uri, "wt")!!.use { it.write(json.toString(2).toByteArray()) }
-        }.isSuccess
-        Toast.makeText(this, if (ok) "Chiavi esportate" else "Esportazione non riuscita", Toast.LENGTH_LONG).show()
-    }
-
-    private fun importa(uri: Uri) {
-        val json = runCatching {
-            val testo = contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() }
-            JSONObject(testo).takeIf { it.optString("app") == "TapiTranscriber" }
-        }.getOrNull()
-        if (json == null) {
+    private fun aggiorna(v: Versione) {
+        if (!packageManager.canRequestPackageInstalls()) {
+            // Serve una volta sola: Android chiede di permettere a TapiTranscriber di installare i suoi aggiornamenti
             AlertDialog.Builder(this)
-                .setTitle("Importazione non riuscita")
-                .setMessage("Il file scelto non è un'esportazione di TapiTranscriber.")
-                .setPositiveButton("OK", null)
+                .setTitle("Permesso da dare una volta")
+                .setMessage(
+                    "Per aggiornarsi da sola TapiTranscriber deve poter installare app.\n\n" +
+                        "Nella schermata che si apre attiva \"Consenti da questa fonte\", poi torna qui e premi di nuovo Aggiorna.",
+                )
+                .setPositiveButton("Apri") { _, _ ->
+                    runCatching {
+                        startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                    }
+                }
+                .setNegativeButton("Annulla", null)
                 .show()
             return
         }
-        val groq = json.optString("groq")
-        val gemini = json.optString("gemini")
-        if (groq.isNotEmpty()) campoGroq.setText(groq)
-        if (gemini.isNotEmpty()) campoGemini.setText(gemini)
-        if (json.has("italiano")) italiano.isChecked = json.optBoolean("italiano", true)
-        salva()
-        val quali = listOfNotNull("Groq".takeIf { groq.isNotEmpty() }, "Gemini".takeIf { gemini.isNotEmpty() })
-            .joinToString(" e ")
-        AlertDialog.Builder(this)
-            .setTitle("Chiavi importate")
-            .setMessage("Importate e salvate: $quali.\n\nOra puoi cancellare il file di esportazione.")
-            .setPositiveButton("OK", null)
+        val barra = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
+        val attesa = AlertDialog.Builder(this)
+            .setTitle("Scarico la versione ${v.nome}…")
+            .setView(LinearLayout(this).apply {
+                setPadding(dp(24), dp(12), dp(24), dp(8))
+                addView(barra, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            })
+            .setCancelable(false)
             .show()
+        Thread {
+            val esito = runCatching {
+                val apk = Aggiornamenti.scarica(this, v) { p -> runOnUiThread { barra.progress = p } }
+                Aggiornamenti.installa(this, apk)
+            }
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                attesa.dismiss()
+                esito.onFailure {
+                    AlertDialog.Builder(this)
+                        .setTitle("Aggiornamento non riuscito")
+                        .setMessage("Download non riuscito. Controlla la connessione e riprova.")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+        }.start()
     }
 
     // ---------- ultima trascrizione ----------
@@ -355,8 +351,4 @@ class ImpostazioniActivity : Activity() {
             .show()
     }
 
-    companion object {
-        private const val RICHIESTA_ESPORTA = 1
-        private const val RICHIESTA_IMPORTA = 2
-    }
 }

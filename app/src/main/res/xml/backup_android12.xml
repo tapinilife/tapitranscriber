@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+: nel backup (cloud e passaggio a un nuovo telefono) vanno SOLO chiavi e opzioni. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="sharedpref" path="trascrivi.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="trascrivi.xml" />
+    </device-transfer>
+</data-extraction-rules>
