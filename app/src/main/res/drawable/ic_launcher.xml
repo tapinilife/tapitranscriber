@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Microfono bianco su cerchio viola, con righe di testo -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#5E35B1" android:pathData="M24,0a24,24 0,1 1,0 48a24,24 0,1 1,0 -48z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M18,11a4,4 0,0 1,8 0v10a4,4 0,0 1,-8 0z" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="2" android:fillColor="#00000000"
+        android:pathData="M14,19v2a8,8 0,0 0,16 0v-2M22,29v5M18,34h8" />
+    <path android:fillColor="#FFFFFF" android:pathData="M30,14h8v2h-8zM30,19h6v2h-6zM14,38h22v2h-22z" />
+</vector>

@@ -1,0 +1,15 @@
+# Build
+.gradle/
+build/
+app/build/
+.kotlin/
+# Segreti e percorsi locali: MAI nel repository
+local.properties
+*.jks
+*.keystore
+keystore.properties
+.idea/
+*.iml
+*token*.txt
+prove/
+*.apk
