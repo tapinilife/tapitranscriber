@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Per installare i propri aggiornamenti scaricati da GitHub (Android chiede il consenso una volta) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Per registrare un audio dall'app (resta solo in memoria) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:allowBackup="true"
@@ -14,15 +16,28 @@
         android:supportsRtl="true"
         android:theme="@style/Tema">
 
-        <!-- Impostazioni: chiavi API e prova -->
+        <!-- Schermata principale: registra, scegli un audio, condividi l'app -->
         <activity
-            android:name=".ImpostazioniActivity"
+            android:name=".PrincipaleActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Impostazioni: chiavi API, lingua, aggiornamenti -->
+        <activity
+            android:name=".ImpostazioniActivity"
+            android:exported="false" />
+
+        <!-- Fornisce l'APK da condividere (sola lettura, solo a chi riceve il permesso) -->
+        <provider
+            android:name=".ProviderApk"
+            android:authorities="app.tapitranscriber.condividi"
+            android:exported="false"
+            android:grantUriPermissions="true" />
 
         <!-- Riceve l'audio da "Condividi" o "Apri con" e mostra la trascrizione in un popup -->
         <activity

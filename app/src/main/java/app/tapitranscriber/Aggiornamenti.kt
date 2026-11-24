@@ -144,3 +144,90 @@ class EsitoInstallazione : BroadcastReceiver() {
 
     private fun avviso(ctx: Context, s: String) = Toast.makeText(ctx, s, Toast.LENGTH_LONG).show()
 }
+
+/** Controllo, proposta, download e installazione degli aggiornamenti, riusabile da più schermate. */
+class ControlloAggiornamenti(private val a: android.app.Activity) {
+    private val pref = Preferenze(a)
+    private var inCorso = false
+
+    /** Da chiamare in onResume: controlla al massimo ogni 6 ore, senza disturbare se non c'è niente. */
+    fun seServe() {
+        if (System.currentTimeMillis() - pref.ultimoControllo > 6 * 3_600_000L) controlla(silenzioso = true)
+    }
+
+    fun controlla(silenzioso: Boolean) {
+        if (inCorso) return
+        inCorso = true
+        if (!silenzioso) Toast.makeText(a, "Controllo aggiornamenti…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val esito = runCatching { Aggiornamenti.ultima() }
+            a.runOnUiThread {
+                inCorso = false
+                if (a.isFinishing || a.isDestroyed) return@runOnUiThread
+                val v = esito.getOrNull()
+                if (esito.isSuccess) pref.ultimoControllo = System.currentTimeMillis()
+                when {
+                    v != null && v.codice > Aggiornamenti.versioneInstallata(a) -> proponi(v)
+                    silenzioso -> {}
+                    esito.isFailure -> Toast.makeText(a, "Non riesco a controllare: sei connesso a Internet?", Toast.LENGTH_LONG).show()
+                    else -> Toast.makeText(a, "Hai già l'ultima versione", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun proponi(v: Versione) {
+        android.app.AlertDialog.Builder(a)
+            .setTitle("Nuova versione ${v.nome}")
+            .setMessage(v.novita.ifBlank { "È disponibile una versione nuova di TapiTranscriber." })
+            .setPositiveButton("Aggiorna") { _, _ -> aggiorna(v) }
+            .setNegativeButton("Più tardi", null)
+            .show()
+    }
+
+    private fun aggiorna(v: Versione) {
+        if (!a.packageManager.canRequestPackageInstalls()) {
+            // Serve una volta sola: Android chiede di permettere a TapiTranscriber di installare i suoi aggiornamenti
+            android.app.AlertDialog.Builder(a)
+                .setTitle("Permesso da dare una volta")
+                .setMessage(
+                    "Per aggiornarsi da sola TapiTranscriber deve poter installare app.\n\n" +
+                        "Nella schermata che si apre attiva \"Consenti da questa fonte\", poi torna qui e premi di nuovo Aggiorna.",
+                )
+                .setPositiveButton("Apri") { _, _ ->
+                    runCatching {
+                        a.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:${a.packageName}")))
+                    }
+                }
+                .setNegativeButton("Annulla", null)
+                .show()
+            return
+        }
+        val barra = android.widget.ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
+        val attesa = android.app.AlertDialog.Builder(a)
+            .setTitle("Scarico la versione ${v.nome}…")
+            .setView(android.widget.LinearLayout(a).apply {
+                setPadding(a.dp(24), a.dp(12), a.dp(24), a.dp(8))
+                addView(barra, android.widget.LinearLayout.LayoutParams(-1, -2))
+            })
+            .setCancelable(false)
+            .show()
+        Thread {
+            val esito = runCatching {
+                val apk = Aggiornamenti.scarica(a, v) { p -> a.runOnUiThread { barra.progress = p } }
+                Aggiornamenti.installa(a, apk)
+            }
+            a.runOnUiThread {
+                if (a.isDestroyed) return@runOnUiThread
+                attesa.dismiss()
+                esito.onFailure {
+                    android.app.AlertDialog.Builder(a)
+                        .setTitle("Aggiornamento non riuscito")
+                        .setMessage("Download non riuscito. Controlla la connessione e riprova.")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+        }.start()
+    }
+}

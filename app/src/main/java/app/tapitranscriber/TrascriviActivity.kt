@@ -28,6 +28,18 @@ class TrascriviActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent.getBooleanExtra(EXTRA_REGISTRAZIONE, false)) {
+            // Registrazione fatta nell'app: l'audio è in RAM, lo prendo e lo tolgo subito da lì
+            val audio = AudioInMemoria.prendi()
+            if (audio == null) {
+                finish()
+                return
+            }
+            val mime = AudioInMemoria.mime
+            mostraAttesa()
+            Thread { lavora { audio to mime } }.start()
+            return
+        }
         val uri = audioDaIntent(intent)
         if (uri == null) {
             Toast.makeText(this, "Nessun audio ricevuto", Toast.LENGTH_LONG).show()
@@ -35,7 +47,15 @@ class TrascriviActivity : Activity() {
             return
         }
         mostraAttesa()
-        Thread { lavora(uri) }.start()
+        Thread {
+            lavora {
+                val mime = (intent.type?.takeIf { '*' !in it } ?: contentResolver.getType(uri) ?: "audio/ogg")
+                    .substringBefore(';').trim().lowercase()
+                val audio = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw ErroreServizio("Impossibile leggere l'audio")
+                audio to mime
+            }
+        }.start()
     }
 
     private fun audioDaIntent(i: Intent): Uri? {
@@ -50,13 +70,10 @@ class TrascriviActivity : Activity() {
     }
 
     /** Legge l'audio in RAM (nessuna copia su disco), lo trascrive e poi lo lascia liberare. */
-    private fun lavora(uri: Uri) {
+    private fun lavora(leggi: () -> Pair<ByteArray, String>) {
         val pref = Preferenze(this)
         val esito: Result<Risultato> = try {
-            val mime = (intent.type?.takeIf { it != "*/*" } ?: contentResolver.getType(uri) ?: "audio/ogg")
-                .substringBefore(';').trim().lowercase()
-            val audio = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                ?: throw ErroreServizio("Impossibile leggere l'audio")
+            val (audio, mime) = leggi()
             if (audio.isEmpty()) throw ErroreServizio("L'audio è vuoto")
             val t = Trascrittore(pref)
             val r = t.trascrivi(audio, mime)
@@ -275,5 +292,9 @@ class TrascriviActivity : Activity() {
         runCatching { cacheDir.listFiles()?.forEach { it.deleteRecursively() } }
         runCatching { codeCacheDir.listFiles()?.forEach { it.deleteRecursively() } }
         super.onDestroy()
+    }
+
+    companion object {
+        const val EXTRA_REGISTRAZIONE = "registrazione"
     }
 }
